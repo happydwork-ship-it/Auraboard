@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AuraBoard — Finger Air Drawing</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Orbitron:wght@700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:'DM Mono',monospace,sans-serif;}
+
+/* ── GATE ── */
+#gate{
+  position:fixed;inset:0;z-index:999;
+  background:radial-gradient(ellipse at 40% 50%,#060e1f 0%,#000 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;
+  transition:opacity 0.7s;
+}
+#gate.out{opacity:0;pointer-events:none;}
+.g-title{
+  font-family:'Orbitron',sans-serif;font-size:clamp(26px,5vw,54px);font-weight:900;
+  color:#fff;letter-spacing:0.08em;
+  text-shadow:0 0 40px rgba(0,212,255,0.7),0 0 80px rgba(0,212,255,0.2);
+}
+.g-title span{color:#00d4ff;}
+.g-sub{font-size:10px;letter-spacing:0.22em;color:rgba(255,255,255,0.28);text-transform:uppercase;}
+.g-btn{
+  padding:15px 46px;background:transparent;
+  border:1px solid rgba(0,212,255,0.55);border-radius:50px;
+  color:#00d4ff;font-family:'DM Mono',monospace;font-size:11px;
+  letter-spacing:0.22em;text-transform:uppercase;cursor:pointer;
+  transition:all 0.3s;box-shadow:0 0 24px rgba(0,212,255,0.1);
+}
+.g-btn:hover{background:rgba(0,212,255,0.08);box-shadow:0 0 40px rgba(0,212,255,0.28);transform:scale(1.03);}
+.g-steps{
+  font-size:9px;letter-spacing:0.14em;color:rgba(255,255,255,0.18);
+  text-align:center;line-height:2.4;max-width:360px;
+}
+.g-steps b{color:rgba(0,212,255,0.6);font-weight:400;}
+#g-err{font-size:10px;color:#ff4455;letter-spacing:0.12em;display:none;text-align:center;max-width:320px;line-height:1.8;}
+
+/* ── STAGE ── */
+#stage{position:fixed;inset:0;display:none;}
+
+/* Hidden processing canvas */
+#c-proc{display:none;}
+
+/* Camera — full screen mirrored */
+#cam{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;transform:scaleX(-1);
+  filter:brightness(0.4) saturate(1.3) contrast(1.1);
+  z-index:0;
+}
+
+/* Drawing layer */
+#c-draw{position:absolute;inset:0;width:100%;height:100%;z-index:2;pointer-events:none;}
+/* FX + overlay layer */
+#c-fx{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;}
+
+/* Vignette */
+#vig{
+  position:absolute;inset:0;z-index:4;pointer-events:none;
+  background:radial-gradient(ellipse 72% 68% at 50% 50%,
+    transparent 0%,transparent 40%,rgba(0,0,0,0.28) 62%,rgba(0,0,0,0.78) 100%);
+}
+
+/* HUD */
+#hud{position:absolute;inset:0;z-index:5;pointer-events:none;}
+.tl{position:absolute;top:0;left:0;padding:20px 24px;}
+.tr{position:absolute;top:0;right:0;padding:20px 24px;text-align:right;}
+.bl{position:absolute;bottom:0;left:0;padding:20px 24px;}
+.br{position:absolute;bottom:0;right:0;padding:20px 24px;text-align:right;}
+
+.brand{font-family:'Orbitron',sans-serif;font-size:16px;font-weight:700;color:#fff;letter-spacing:0.1em;}
+.brand span{color:#00d4ff;}
+.bsub{font-size:8px;letter-spacing:0.2em;color:rgba(255,255,255,0.25);margin-top:3px;}
+.stats{margin-top:12px;display:flex;flex-direction:column;gap:5px;}
+.st{font-size:9px;letter-spacing:0.13em;color:rgba(0,212,255,0.6);}
+.st b{color:rgba(255,255,255,0.88);font-weight:400;}
+
+.badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 14px;border-radius:20px;
+  border:1px solid rgba(0,212,255,0.3);background:rgba(0,0,0,0.4);
+  font-size:9px;letter-spacing:0.18em;color:rgba(0,212,255,0.88);
+  transition:all 0.3s;
+}
+.badge.erase{border-color:rgba(255,47,123,0.5);color:rgba(255,47,123,0.9);}
+.badge .dot{width:5px;height:5px;border-radius:50%;background:currentColor;
+  box-shadow:0 0 6px currentColor;animation:blink 1.4s ease infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0.15;}}
+
+.hints{font-size:8px;letter-spacing:0.13em;color:rgba(255,255,255,0.17);line-height:2.4;}
+.coord{font-size:9px;letter-spacing:0.13em;color:rgba(255,255,255,0.2);line-height:2;}
+
+/* calibrate panel */
+#cal-panel{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:10;pointer-events:all;
+  background:rgba(0,0,0,0.75);backdrop-filter:blur(16px);
+  border:1px solid rgba(0,212,255,0.3);border-radius:16px;
+  padding:28px 36px;text-align:center;
+  display:none;flex-direction:column;gap:16px;min-width:280px;
+}
+#cal-panel.show{display:flex;}
+.cal-title{font-family:'Orbitron',sans-serif;font-size:13px;letter-spacing:0.14em;color:#00d4ff;}
+.cal-msg{font-size:9px;letter-spacing:0.14em;color:rgba(255,255,255,0.5);line-height:2;}
+.cal-swatch{
+  width:80px;height:80px;border-radius:50%;margin:0 auto;
+  border:2px solid rgba(255,255,255,0.2);
+  background:rgba(255,150,100,0.5);
+}
+.cal-btn{
+  padding:10px 24px;background:transparent;
+  border:1px solid rgba(0,212,255,0.5);border-radius:30px;
+  color:#00d4ff;font-family:'DM Mono',monospace;font-size:10px;
+  letter-spacing:0.18em;cursor:pointer;transition:all 0.2s;
+}
+.cal-btn:hover{background:rgba(0,212,255,0.08);}
+
+/* sensitivity slider */
+#sens-wrap{
+  position:absolute;top:50%;right:24px;transform:translateY(-50%);
+  z-index:5;pointer-events:all;
+  display:none;flex-direction:column;align-items:center;gap:8px;
+}
+#sens-wrap.show{display:flex;}
+.sens-lbl{font-size:8px;letter-spacing:0.16em;color:rgba(0,212,255,0.5);text-transform:uppercase;}
+input[type=range].vslider{
+  -webkit-appearance:none;appearance:none;
+  writing-mode:vertical-lr;direction:rtl;
+  width:4px;height:120px;
+  background:rgba(0,212,255,0.2);border-radius:4px;outline:none;cursor:pointer;
+}
+input[type=range].vslider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#00d4ff;box-shadow:0 0 8px #00d4ff;cursor:pointer;
+}
+
+/* color palette */
+#palette{
+  position:absolute;bottom:32px;left:50%;transform:translateX(-50%);
+  z-index:5;display:none;align-items:center;gap:10px;
+  background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.07);
+  border-radius:50px;padding:10px 18px;pointer-events:all;
+}
+#palette.show{display:flex;}
+.swatch{
+  width:22px;height:22px;border-radius:50%;cursor:pointer;
+  border:2px solid transparent;transition:transform 0.2s,border-color 0.2s;
+}
+.swatch:hover{transform:scale(1.25);}
+.swatch.active{border-color:rgba(255,255,255,0.7);transform:scale(1.18);}
+.pal-sep{width:1px;height:20px;background:rgba(255,255,255,0.08);}
+.pal-btn{
+  width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:13px;transition:all 0.2s;
+}
+.pal-btn:hover{background:rgba(255,47,123,0.1);border-color:rgba(255,47,123,0.4);}
+
+/* toast */
+.toast{
+  position:absolute;bottom:90px;left:50%;transform:translateX(-50%);
+  padding:9px 24px;border-radius:30px;
+  border:1px solid rgba(0,212,255,0.35);background:rgba(0,0,0,0.55);
+  font-size:10px;letter-spacing:0.18em;color:rgba(0,212,255,0.9);
+  text-transform:uppercase;opacity:0;transition:opacity 0.3s;
+  z-index:6;pointer-events:none;white-space:nowrap;
+}
+.toast.show{opacity:1;}
+
+#lbar{position:fixed;top:0;left:0;height:2px;z-index:9999;
+  background:linear-gradient(90deg,#00d4ff,#7b2fff);width:0%;transition:width 0.4s;}
+</style>
+</head>
+<body>
+<div id="lbar"></div>
+
+<!-- GATE -->
+<div id="gate">
+  <div class="g-title">Aura<span>Board</span></div>
+  <div class="g-sub">Zero-Dependency · Browser-Native · Finger Air Drawing</div>
+  <button class="g-btn" id="start-btn">Enable Camera &amp; Draw</button>
+  <div class="g-steps">
+    After camera starts, <b>click "Calibrate Skin"</b> and hover your hand over the dot<br>
+    ☝ <b>Index finger up</b> → draw neon trails<br>
+    🤏 <b>Two fingers close</b> → erase &amp; shatter<br>
+    ✊ <b>Show palm / wave</b> → clear canvas<br>
+    Use <b>color palette</b> at bottom to switch colors
+  </div>
+  <div id="g-err"></div>
+</div>
+
+<!-- STAGE -->
+<div id="stage">
+  <video id="cam" autoplay muted playsinline></video>
+  <canvas id="c-proc"></canvas>
+  <canvas id="c-draw"></canvas>
+  <canvas id="c-fx"></canvas>
+  <div id="vig"></div>
+
+  <div id="hud">
+    <div class="tl">
+      <div class="brand">Aura<span>Board</span></div>
+      <div class="bsub">SKIN-TRACK · NATIVE API</div>
+      <div class="stats">
+        <div class="st">FPS <b id="h-fps">—</b></div>
+        <div class="st">TRACKING <b id="h-trk">—</b></div>
+        <div class="st">TRAILS <b id="h-trails">0</b></div>
+      </div>
+    </div>
+    <div class="tr">
+      <div class="badge" id="badge"><div class="dot"></div><span id="badge-txt">READY</span></div>
+      <div class="stats" style="align-items:flex-end;margin-top:10px;">
+        <div class="st">COLOR <b id="h-color" style="color:#00d4ff">CYAN</b></div>
+        <div class="st">MODE <b id="h-mode">DRAW</b></div>
+      </div>
+    </div>
+    <div class="bl">
+      <div class="hints">
+        ☝ INDEX UP → DRAW<br>
+        ✌ PINCH CLOSE → ERASE<br>
+        🖐 OPEN PALM → CLEAR<br>
+        PALETTE BELOW → COLOR
+      </div>
+    </div>
+    <div class="br">
+      <div class="coord" id="coord">X: — &nbsp;Y: —</div>
+    </div>
+  </div>
+
+  <!-- Calibrate panel -->
+  <div id="cal-panel">
+    <div class="cal-title">SKIN CALIBRATION</div>
+    <div class="cal-msg">Hold your hand over the circle<br>so your skin covers it, then press Capture</div>
+    <canvas class="cal-swatch" id="cal-canvas" width="80" height="80"></canvas>
+    <button class="cal-btn" id="cal-capture">Capture Skin Color</button>
+    <button class="cal-btn" id="cal-close" style="border-color:rgba(255,255,255,0.2);color:rgba(255,255,255,0.4);">Close</button>
+  </div>
+
+  <!-- Sensitivity slider -->
+  <div id="sens-wrap">
+    <div class="sens-lbl">SENS</div>
+    <input type="range" class="vslider" id="sensitivity" min="10" max="80" value="35">
+    <div class="sens-lbl" id="sens-val">35</div>
+  </div>
+
+  <!-- Color palette -->
+  <div id="palette">
+    <div class="swatch active" style="background:#00d4ff" data-c="#00d4ff" data-n="CYAN"></div>
+    <div class="swatch" style="background:#7b2fff" data-c="#7b2fff" data-n="VIOLET"></div>
+    <div class="swatch" style="background:#00ffaa" data-c="#00ffaa" data-n="MINT"></div>
+    <div class="swatch" style="background:#ff9f00" data-c="#ff9f00" data-n="AMBER"></div>
+    <div class="swatch" style="background:#ff2f7b" data-c="#ff2f7b" data-n="ROSE"></div>
+    <div class="swatch" style="background:#ffee00" data-c="#ffee00" data-n="GOLD"></div>
+    <div class="swatch" style="background:#fff" data-c="#ffffff" data-n="WHITE"></div>
+    <div class="pal-sep"></div>
+    <div class="pal-btn" id="cal-open-btn" title="Calibrate skin">🎯</div>
+    <div class="pal-btn" id="clear-btn" title="Clear canvas">🗑</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  AuraBoard — Pure Browser Skin-Track Engine
+//  No external dependencies. Uses:
+//  - getUserMedia (camera)
+//  - Canvas 2D pixel analysis (skin detection)
+//  - RequestAnimationFrame (render loop)
+// ══════════════════════════════════════════════
+
+const $=id=>document.getElementById(id);
+const vid=$('cam'), procCanvas=$('c-proc'), dCanvas=$('c-draw'), fxCanvas=$('c-fx');
+let pCtx, dCtx, fCtx;
+let W=0,H=0;
+
+// ── Skin calibration ──
+let skin = { h:15, s:40, v:40, range:35 }; // defaults (warm skin tones)
+let sensitivity = 35;
+
+// ── App state ──
+const app = {
+  trails:[], live:null, particles:[], shards:[],
+  tip:{x:-1,y:-1}, prevTip:{x:-1,y:-1},
+  tipHistory:[], TH:8,   // smoothing history
+  blob:null,             // detected blob
+  blobArea:0,
+  mode:'idle',
+  color:'#00d4ff',
+  fc:0, fpsT:0, fps:0,
+  toastTimer:null,
+  tracking:false,
+  frameSkip:0,
+};
+
+// ── Resize ──
+function resize(){
+  W=window.innerWidth; H=window.innerHeight;
+  dCanvas.width=fxCanvas.width=W;
+  dCanvas.height=fxCanvas.height=H;
+  procCanvas.width=320; procCanvas.height=240; // small for perf
+}
+window.addEventListener('resize',()=>{resize();redrawTrails();});
+
+// ── RGB→HSV ──
+function rgbToHsv(r,g,b){
+  r/=255;g/=255;b/=255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b);
+  let h,s,v=max;
+  const d=max-min;
+  s=max===0?0:d/max;
+  if(max===min){h=0;}
+  else{
+    switch(max){
+      case r:h=(g-b)/d+(g<b?6:0);break;
+      case g:h=(b-r)/d+2;break;
+      case b:h=(r-g)/d+4;break;
+    }
+    h/=6;
+  }
+  return[h*360,s*100,v*100];
+}
+
+// ── Skin pixel test ──
+function isSkin(r,g,b){
+  const[h,s,v]=rgbToHsv(r,g,b);
+  const dh=Math.abs(h-skin.h);
+  const ds=Math.abs(s-skin.s);
+  const dv=Math.abs(v-skin.v);
+  const dist=dh*0.5+ds*0.3+dv*0.2;
+  return dist<sensitivity && v>15 && s>8;
+}
+
+// ── Find fingertip (topmost centroid of largest skin blob) ──
+function detectFingertip(imageData){
+  const d=imageData.data, W2=320, H2=240;
+  // Downsample pass — build binary mask
+  const mask=new Uint8Array(W2*H2);
+  for(let y=0;y<H2;y++){
+    for(let x=0;x<W2;x++){
+      const i=(y*W2+x)*4;
+      if(isSkin(d[i],d[i+1],d[i+2])) mask[y*W2+x]=1;
+    }
+  }
+
+  // Simple connected blob via row-scan — find topmost skin cluster
+  // Track top-most skin pixels for fingertip (highest y = smallest y value)
+  let topY=H2, topSumX=0, topCount=0;
+  let totalX=0,totalY=0,totalN=0;
+
+  for(let y=0;y<H2;y++){
+    for(let x=0;x<W2;x++){
+      if(mask[y*W2+x]){
+        totalX+=x;totalY+=y;totalN++;
+        if(y<topY+8){
+          if(y<topY){topY=y;topSumX=x;topCount=1;}
+          else{topSumX+=x;topCount++;}
+        }
+      }
+    }
+  }
+
+  if(totalN<60) return null; // not enough skin
+
+  // Map from 320x240 proc space → actual canvas space (mirrored)
+  const scaleX=W/W2, scaleY=H/H2;
+
+  // Fingertip = topmost cluster centroid
+  const tipX=(topCount>0?(topSumX/topCount):totalX/totalN)*scaleX;
+  const tipY=topY*scaleY;
+
+  // Blob centroid for gesture sizing
+  const centX=(totalX/totalN)*scaleX;
+  const centY=(totalY/totalN)*scaleY;
+
+  return{tipX,tipY,centX,centY,area:totalN};
+}
+
+// ── Smooth tip position ──
+function smoothTip(x,y){
+  app.tipHistory.push({x,y});
+  if(app.tipHistory.length>app.TH) app.tipHistory.shift();
+  const sx=app.tipHistory.reduce((a,p)=>a+p.x,0)/app.tipHistory.length;
+  const sy=app.tipHistory.reduce((a,p)=>a+p.y,0)/app.tipHistory.length;
+  return{x:sx,y:sy};
+}
+
+// ── Trail rendering ──
+function renderTrail(t,ctx){
+  if(!t||t.pts.length<2)return;
+  ctx.save();
+  ctx.lineCap='round';ctx.lineJoin='round';
+  // glow
+  ctx.shadowColor=t.color;ctx.shadowBlur=t.w*5;
+  ctx.strokeStyle=t.color;ctx.lineWidth=t.w*2.6;ctx.globalAlpha=(t.a??1)*0.28;
+  smooth(ctx,t.pts);ctx.stroke();
+  // core
+  ctx.shadowBlur=t.w*2;ctx.lineWidth=t.w;ctx.globalAlpha=t.a??1;
+  smooth(ctx,t.pts);ctx.stroke();
+  ctx.restore();
+}
+function smooth(ctx,pts){
+  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length-1;i++){
+    const mx=(pts[i].x+pts[i+1].x)/2,my=(pts[i].y+pts[i+1].y)/2;
+    ctx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my);
+  }
+  const l=pts[pts.length-1];ctx.lineTo(l.x,l.y);
+}
+function redrawTrails(){
+  dCtx.clearRect(0,0,W,H);
+  app.trails.forEach(t=>renderTrail(t,dCtx));
+}
+
+// ── Particles & Shards ──
+function spawnParts(x,y,color,n=12){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,s=2+Math.random()*5;
+    app.particles.push({x,y,color,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,
+      life:1,decay:0.025+Math.random()*0.04,sz:1.5+Math.random()*3.5});
+  }
+}
+function spawnShards(x,y,color,n=14){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,s=4+Math.random()*8;
+    app.shards.push({x,y,color,vx:Math.cos(a)*s,vy:Math.sin(a)*s-3,
+      rot:Math.random()*Math.PI*2,rotV:(Math.random()-0.5)*0.3,
+      life:1,decay:0.018+Math.random()*0.026,sz:8+Math.random()*22});
+  }
+}
+function eraseAt(x,y){
+  const R=65;let hit=false;
+  app.trails=app.trails.filter(t=>{
+    const h=t.pts.some(p=>Math.hypot(p.x-x,p.y-y)<R);
+    if(h){t.pts.forEach((p,i)=>{if(i%4===0)spawnParts(p.x,p.y,t.color,5);});
+          spawnShards(x,y,t.color);hit=true;}
+    return!h;
+  });
+  if(hit){redrawTrails();$('h-trails').textContent=app.trails.length;}
+}
+
+// ── Gesture from blob area ──
+let prevArea=0;
+let gestureState='idle';
+let gestureFrames=0;
+
+function classifyGesture(area,tipY,centY){
+  // Large blob = open palm; small = fist or pointing
+  const rel=area/(320*240);
+  if(rel>0.12) return 'palm';          // big area → open palm
+  if(rel>0.04 && tipY<centY-20) return 'draw'; // tip well above centroid → pointing
+  if(rel>0.04) return 'pinch';          // medium, tip near centroid → two fingers / pinch
+  return 'idle';
+}
+
+// ── Mode UI ──
+function setMode(m){
+  app.mode=m;
+  const b=$('badge'),t=$('badge-txt');
+  if(m==='draw') {b.className='badge';t.textContent='DRAWING';}
+  else if(m==='erase'){b.className='badge erase';t.textContent='ERASE';}
+  else if(m==='clear'){b.className='badge erase';t.textContent='CLEAR';}
+  else {b.className='badge';t.textContent='READY';}
+  $('h-mode').textContent=m.toUpperCase();
+}
+
+function showToast(msg,isErr=false){
+  const el=$('toast');
+  el.textContent=msg;
+  el.style.color=isErr?'rgba(255,47,123,0.9)':'rgba(0,212,255,0.9)';
+  el.style.borderColor=isErr?'rgba(255,47,123,0.35)':'rgba(0,212,255,0.35)';
+  el.classList.add('show');
+  clearTimeout(app.toastTimer);
+  app.toastTimer=setTimeout(()=>el.classList.remove('show'),1400);
+}
+
+// ── Per-frame processing ──
+function processFrame(){
+  app.frameSkip++;
+  if(app.frameSkip%2!==0) return; // process every 2nd frame for perf
+
+  if(vid.readyState<2) return;
+  // Draw video to small proc canvas
+  pCtx.save();
+  pCtx.translate(320,0);pCtx.scale(-1,1); // mirror to match display
+  pCtx.drawImage(vid,0,0,320,240);
+  pCtx.restore();
+
+  const imageData=pCtx.getImageData(0,0,320,240);
+  const result=detectFingertip(imageData);
+
+  if(!result){
+    app.tracking=false;
+    $('h-trk').textContent='LOST';
+    if(app.live&&app.live.pts.length>2){
+      app.trails.push(app.live);
+      $('h-trails').textContent=app.trails.length;
+    }
+    app.live=null;
+    gestureState='idle';
+    setMode('idle');
+    return;
+  }
+
+  app.tracking=true;
+  $('h-trk').textContent='LOCKED';
+
+  const{tipX,tipY,centX,centY,area}=result;
+  const sp=smoothTip(tipX,tipY);
+  app.tip={x:sp.x,y:sp.y};
+  app.blobArea=area;
+
+  $('coord').innerHTML=`X:&nbsp;${Math.round(sp.x)}&nbsp;&nbsp;Y:&nbsp;${Math.round(sp.y)}`;
+
+  const rawG=classifyGesture(area,tipY,centY);
+  // debounce
+  gestureFrames++;
+  if(rawG!==gestureState){
+    if(gestureFrames>3){gestureState=rawG;gestureFrames=0;}
+  } else {gestureFrames=0;}
+
+  const g=gestureState;
+
+  if(g==='draw'){
+    setMode('draw');
+    if(!app.live){
+      app.live={pts:[{x:sp.x,y:sp.y}],color:app.color,w:3.5,a:1};
+    } else {
+      const last=app.live.pts[app.live.pts.length-1];
+      if(Math.hypot(sp.x-last.x,sp.y-last.y)>4){
+        app.live.pts.push({x:sp.x,y:sp.y});
+        dCtx.clearRect(0,0,W,H);
+        app.trails.forEach(t=>renderTrail(t,dCtx));
+        renderTrail(app.live,dCtx);
+      }
+    }
+  } else if(g==='pinch'){
+    if(app.live){app.trails.push(app.live);app.live=null;$('h-trails').textContent=app.trails.length;}
+    setMode('erase');
+    eraseAt(sp.x,sp.y);
+    showToast('✌ ERASE MODE',true);
+  } else if(g==='palm'){
+    if(app.live){app.live=null;}
+    if(app.trails.length>0){
+      app.trails.forEach(t=>{
+        t.pts.forEach((p,i)=>{if(i%3===0)spawnParts(p.x,p.y,t.color,3);});
+        spawnShards(sp.x,sp.y,t.color,14);
+      });
+      app.trails=[];dCtx.clearRect(0,0,W,H);
+      $('h-trails').textContent=0;
+      showToast('🖐 CANVAS DESTROYED',true);
+    }
+    setMode('idle');
+  } else {
+    if(app.live&&app.live.pts.length>3){
+      app.trails.push(app.live);$('h-trails').textContent=app.trails.length;
+    }
+    app.live=null;
+    setMode('idle');
+  }
+}
+
+// ── FX Canvas render ──
+function renderFX(){
+  fCtx.clearRect(0,0,W,H);
+
+  // Draw fingertip overlay
+  if(app.tracking&&app.tip.x>0){
+    const col=app.mode==='erase'?'#ff2f7b':app.color;
+    const x=app.tip.x,y=app.tip.y;
+
+    fCtx.save();
+    // Outer ring
+    fCtx.strokeStyle=col;fCtx.lineWidth=1.5;
+    fCtx.shadowColor=col;fCtx.shadowBlur=20;fCtx.globalAlpha=0.8;
+    fCtx.beginPath();fCtx.arc(x,y,20,0,Math.PI*2);fCtx.stroke();
+    // Crosshair
+    fCtx.beginPath();
+    fCtx.moveTo(x-28,y);fCtx.lineTo(x+28,y);
+    fCtx.moveTo(x,y-28);fCtx.lineTo(x,y+28);
+    fCtx.stroke();
+    // Center dot
+    fCtx.globalAlpha=0.95;fCtx.shadowBlur=28;
+    fCtx.fillStyle=col;
+    fCtx.beginPath();fCtx.arc(x,y,app.mode==='draw'?7:4,0,Math.PI*2);fCtx.fill();
+    fCtx.restore();
+  }
+
+  // Particles
+  app.particles=app.particles.filter(p=>p.life>0);
+  app.particles.forEach(p=>{
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.14;p.vx*=0.96;p.life-=p.decay;
+    fCtx.save();
+    fCtx.globalAlpha=Math.max(0,p.life*0.85);
+    fCtx.shadowColor=p.color;fCtx.shadowBlur=p.sz*4;
+    fCtx.fillStyle=p.color;
+    fCtx.beginPath();fCtx.arc(p.x,p.y,p.sz*Math.max(0,p.life),0,Math.PI*2);fCtx.fill();
+    fCtx.restore();
+  });
+
+  // Shards
+  app.shards=app.shards.filter(s=>s.life>0);
+  app.shards.forEach(s=>{
+    s.x+=s.vx;s.y+=s.vy;s.vy+=0.22;s.vx*=0.97;
+    s.rot+=s.rotV;s.life-=s.decay;
+    const sz=s.sz*Math.max(0,s.life);
+    fCtx.save();
+    fCtx.globalAlpha=Math.max(0,s.life*0.75);
+    fCtx.translate(s.x,s.y);fCtx.rotate(s.rot);
+    fCtx.strokeStyle=s.color;fCtx.shadowColor=s.color;fCtx.shadowBlur=sz;fCtx.lineWidth=1.5;
+    fCtx.strokeRect(-sz/2,-sz/4,sz,sz*0.45);
+    fCtx.restore();
+  });
+}
+
+// ── Main loop ──
+function loop(ts){
+  processFrame();
+  renderFX();
+  app.fc++;
+  if(ts-app.fpsT>1000){
+    app.fps=Math.round(app.fc*1000/(ts-app.fpsT));
+    $('h-fps').textContent=app.fps;
+    app.fc=0;app.fpsT=ts;
+  }
+  requestAnimationFrame(loop);
+}
+
+// ── Calibration panel ──
+function showCalPanel(){
+  $('cal-panel').classList.add('show');
+  // Live preview from center of video in cal canvas
+  const calCtx=$('cal-canvas').getContext('2d');
+  const previewLoop=()=>{
+    if(!$('cal-panel').classList.contains('show'))return;
+    if(vid.readyState>=2){
+      // Grab center of video
+      pCtx.save();pCtx.translate(320,0);pCtx.scale(-1,1);
+      pCtx.drawImage(vid,0,0,320,240);pCtx.restore();
+      const cx=160,cy=120,r=30;
+      const id=pCtx.getImageData(cx-r,cy-r,r*2,r*2);
+      calCtx.clearRect(0,0,80,80);
+      // Sample avg color
+      let sr=0,sg=0,sb=0,n=0;
+      for(let i=0;i<id.data.length;i+=4){sr+=id.data[i];sg+=id.data[i+1];sb+=id.data[i+2];n++;}
+      const ar=Math.round(sr/n),ag=Math.round(sg/n),ab=Math.round(sb/n);
+      calCtx.fillStyle=`rgb(${ar},${ag},${ab})`;
+      calCtx.beginPath();calCtx.arc(40,40,36,0,Math.PI*2);calCtx.fill();
+      // Draw circle on proc canvas center
+    }
+    requestAnimationFrame(previewLoop);
+  };
+  previewLoop();
+}
+
+$('cal-capture').addEventListener('click',()=>{
+  if(vid.readyState<2)return;
+  // Sample center region
+  pCtx.save();pCtx.translate(320,0);pCtx.scale(-1,1);
+  pCtx.drawImage(vid,0,0,320,240);pCtx.restore();
+  const cx=160,cy=120,r=30;
+  const id=pCtx.getImageData(cx-r,cy-r,r*2,r*2);
+  let sh=0,ss=0,sv=0,n=0;
+  for(let i=0;i<id.data.length;i+=4){
+    const[h,s,v]=rgbToHsv(id.data[i],id.data[i+1],id.data[i+2]);
+    if(v>15){sh+=h;ss+=s;sv+=v;n++;}
+  }
+  if(n>0){
+    skin.h=sh/n;skin.s=ss/n;skin.v=sv/n;
+    showToast('✓ SKIN CALIBRATED');
+    $('cal-panel').classList.remove('show');
+  }
+});
+
+$('cal-close').addEventListener('click',()=>$('cal-panel').classList.remove('show'));
+$('cal-open-btn').addEventListener('click',showCalPanel);
+
+// Sensitivity
+$('sensitivity').addEventListener('input',e=>{
+  sensitivity=parseInt(e.target.value);
+  $('sens-val').textContent=sensitivity;
+});
+
+// Clear
+$('clear-btn').addEventListener('click',()=>{
+  app.trails.forEach(t=>spawnShards(W/2,H/2,t.color,6));
+  app.trails=[];app.live=null;dCtx.clearRect(0,0,W,H);
+  $('h-trails').textContent=0;showToast('🗑 CLEARED');
+});
+
+// Color palette
+document.querySelectorAll('.swatch').forEach(sw=>{
+  sw.addEventListener('click',()=>{
+    document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
+    sw.classList.add('active');
+    app.color=sw.dataset.c;
+    $('h-color').textContent=sw.dataset.n;
+    $('h-color').style.color=sw.dataset.c;
+    showToast(`COLOR → ${sw.dataset.n}`);
+  });
+});
+
+// ── LAUNCH ──
+$('start-btn').addEventListener('click',async()=>{
+  const lb=$('lbar');lb.style.width='20%';
+  const err=$('g-err');err.style.display='none';
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}
+    });
+    vid.srcObject=stream;
+    await new Promise(r=>vid.onloadedmetadata=r);
+    vid.play();
+
+    lb.style.width='65%';
+    $('gate').classList.add('out');
+    setTimeout(()=>$('gate').style.display='none',700);
+    $('stage').style.display='block';
+
+    resize();
+    pCtx=procCanvas.getContext('2d',{willReadFrequently:true});
+    dCtx=dCanvas.getContext('2d');
+    fCtx=fxCanvas.getContext('2d');
+    app.fpsT=performance.now();
+
+    // Show UI
+    $('palette').classList.add('show');
+    $('sens-wrap').classList.add('show');
+
+    lb.style.width='100%';
+    setTimeout(()=>lb.style.opacity='0',600);
+
+    showToast('🎯 CALIBRATE SKIN COLOR FIRST');
+    setTimeout(showCalPanel,1200);
+
+    requestAnimationFrame(loop);
+  }catch(e){
+    err.style.display='block';
+    err.innerHTML=`Camera error: <b>${e.message}</b><br>
+    Make sure you're opening this file in Chrome/Edge<br>
+    and have allowed camera access.`;
+    lb.style.width='0%';
+  }
+});
+</script>
+</body>
+</html>
